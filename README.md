@@ -89,6 +89,50 @@ flutter build windows --release                     # 图标编进 exe
 不用 Material 字形是因为它的笔画在 16px 下不足一个像素，任务栏里会糊成一团；
 手绘的全是粗笔画，16px 下依然能认出形状。
 
+## 自动更新
+
+应用启动后会静默查一次 GitHub 的最新 Release，有新版本就在状态栏出现一个胶囊提示，
+点开可以看版本号和更新说明，一键下载并重启生效。
+
+```
+状态栏  [新版本 v1.2.0]  ← 点击
+   ↓
+对话框  发现新版本 → 立即更新 → 进度条 → 更新已就绪 → 立即重启
+```
+
+### 更新不会被文件锁卡住
+
+难点在于「程序正在运行，怎么替换自己」。这里绕开了这个问题的：
+
+- 单文件 exe 只是个**启动器**，它把应用解压到 `%LOCALAPPDATA%\PortHelper\<版本码>\` 再启动
+- 应用更新时**不碰正在运行的 exe**，只把新版本解压到 `…\<新版本码>\`，然后写一个 `current.txt` 指针
+- 重启时启动器读 `current.txt`，直接拉起新目录里的程序
+
+```
+%LOCALAPPDATA%\PortHelper\
+├─ current.txt     内容是一个版本码，如 10200
+├─ 10100\          v1.1.0 的程序（旧）
+└─ 10200\          v1.2.0 的程序（新，current.txt 指向它）
+```
+
+启动器还会比较「自身内置的版本码」和 `current.txt`，取较高者 ——
+所以用户直接下载了更新的 exe 时，也不会被旧指针带回老版本。
+
+### 相关代码
+
+| 位置 | 职责 |
+| --- | --- |
+| `lib/src/data/update_service.dart` | 查 GitHub API、流式下载、解压落盘、写指针 |
+| `lib/src/state/update_controller.dart` | 状态机：idle → available → downloading → ready |
+| `lib/src/ui/widgets/update_dialog.dart` | 更新对话框 |
+| `tool/bootstrapper.dart` | 读指针、解压内置 payload、传启动器路径给应用 |
+
+Release 会同时上传两个附件：`.exe`（17MB，首次安装）和 `.zip`（11MB，应用内更新用，
+应用优先下 zip，省 6MB 流量）。
+
+> 版本号通过 `--dart-define=APP_VERSION=x.y.z` 编译进程序，运行时和 GitHub 上的 tag 比较。
+> 本地 `flutter run` 没有这个 define，所以开发态不会弹更新提示。
+
 ## 目录结构
 
 ```
@@ -98,12 +142,15 @@ lib/
    ├─ theme/tokens.dart           设计令牌：颜色 / 圆角 / 间距 / 阴影 / 字体
    ├─ theme/app_theme.dart        ThemeData（只装配令牌，不做推导）
    ├─ model/models.dart           监听记录、进程详情、查询结果
+   ├─ model/update_info.dart      版本信息、版本码换算
    ├─ data/port_scanner.dart      netstat 解析 + 编排
    ├─ data/win32_process.dart     Win32 FFI：进程名 / 路径 / 启动时间 / 属主 / 版本描述
+   ├─ data/update_service.dart    更新检查 / 下载 / 解压落盘
    ├─ state/port_controller.dart  查询状态机
+   ├─ state/update_controller.dart 更新状态机
    └─ ui/
       ├─ home_page.dart           920×736 四段式拼装
-      └─ widgets/                 标题栏 / 标题 / 查询 / 结果 / 详情 / 操作 / 状态栏 / 浮层 / 弹窗
+      └─ widgets/                 标题栏 / 标题 / 查询 / 结果 / 详情 / 操作 / 状态栏 / 浮层 / 弹窗 / 更新
 tool/
 ├─ probe.dart                     命令行探针：不开界面直接验证系统调用
 ├─ bench.dart                     性能基准：拆段计时

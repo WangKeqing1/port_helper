@@ -1,14 +1,24 @@
 import 'package:flutter/material.dart';
 
 import '../../state/port_controller.dart';
+import '../../state/update_controller.dart';
 import '../../theme/tokens.dart';
 import 'common.dart';
 
-/// 状态栏 920×40：左侧查询状态，右侧上次刷新时间与 F5 提示。
+/// 状态栏 920×40：左侧查询状态，右侧更新提示、上次刷新时间与 F5 提示。
 class AppStatusBar extends StatelessWidget {
-  const AppStatusBar({super.key, required this.controller});
+  const AppStatusBar({
+    super.key,
+    required this.controller,
+    this.update,
+    this.onOpenUpdate,
+  });
 
   final PortController controller;
+
+  /// 有更新时才传入，没传就完全不显示这一块。
+  final UpdateController? update;
+  final VoidCallback? onOpenUpdate;
 
   @override
   Widget build(BuildContext context) {
@@ -42,6 +52,10 @@ class AppStatusBar extends StatelessWidget {
           Row(
             mainAxisSize: MainAxisSize.min,
             children: [
+              if (update != null && update!.hasUpdate && onOpenUpdate != null) ...[
+                _UpdateChip(update: update!, onTap: onOpenUpdate!),
+                const SizedBox(width: Tokens.gapSection),
+              ],
               Text(
                 '上次刷新 ${_clock(controller.result?.queriedAt)}',
                 style: Tokens.sans(size: 11, color: Tokens.onSurfaceVariant, height: 17),
@@ -75,6 +89,59 @@ class AppStatusBar extends StatelessWidget {
     if (t == null) return '--:--:--';
     String two(int v) => v.toString().padLeft(2, '0');
     return '${two(t.hour)}:${two(t.minute)}:${two(t.second)}';
+  }
+}
+
+/// 状态栏里的更新入口，三态：可更新 / 下载中 / 待重启。
+class _UpdateChip extends StatelessWidget {
+  const _UpdateChip({required this.update, required this.onTap});
+
+  final UpdateController update;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final (label, icon) = switch (update.status) {
+      UpdateStatus.downloading => (
+          '更新中 ${(update.progress * 100).toStringAsFixed(0)}%',
+          Icons.downloading_rounded,
+        ),
+      UpdateStatus.ready => ('重启以更新', Icons.restart_alt_rounded),
+      _ => ('新版本 v${update.info?.version ?? ''}', Icons.system_update_alt_rounded),
+    };
+
+    return HoverRegion(
+      onTap: onTap,
+      builder: (context, hovering) {
+        return AnimatedContainer(
+          duration: const Duration(milliseconds: 120),
+          height: 22,
+          padding: const EdgeInsets.symmetric(horizontal: 8),
+          decoration: BoxDecoration(
+            color: hovering
+                ? Color.alphaBlend(Tokens.primary.withValues(alpha: 0.12), Tokens.primaryContainer)
+                : Tokens.primaryContainer,
+            borderRadius: BorderRadius.circular(Tokens.radiusPill),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              AppIcon(icon, size: 13, color: Tokens.onPrimaryContainer),
+              const SizedBox(width: 5),
+              Text(
+                label,
+                style: Tokens.sans(
+                  size: 10,
+                  weight: FontWeight.w500,
+                  color: Tokens.onPrimaryContainer,
+                  height: 15,
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
   }
 }
 

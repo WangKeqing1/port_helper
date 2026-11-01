@@ -92,10 +92,12 @@ jobs:
         run: flutter test
 
       - name: 构建 Windows 发布版
-        run: flutter build windows --release
+        # 版本号编译进 App，运行时用它和 GitHub 上的最新 Release 比较。
+        run: flutter build windows --release "--dart-define=APP_VERSION=${{ needs.prepare.outputs.version }}"
 
       - name: 打包单文件 exe
-        # 这一步会编译启动器、用 rcedit 注入图标与版本信息、拼接 payload。
+        # 这一步会编译启动器、用 rcedit 注入图标与版本信息、拼接 payload，
+        # 同时把 payload 另存为 .zip 当更新包。
         # --also-ascii 额外产出一份英文名副本，Release 附件用它。
         run: python tool/build_exe.py --also-ascii
 
@@ -105,12 +107,15 @@ jobs:
           v="${{ needs.prepare.outputs.version }}"
           ls -lh dist/
           test -f "dist/port_helper-$v.exe" || { echo "::error::没生成英文名 exe"; exit 1; }
+          test -f "dist/port_helper-$v.zip" || { echo "::error::没生成更新包"; exit 1; }
 
       - name: 上传构建产物
         uses: actions/upload-artifact@v4
         with:
           name: port_helper-${{ needs.prepare.outputs.version }}
-          path: dist/port_helper-*.exe
+          path: |
+            dist/port_helper-*.exe
+            dist/port_helper-*.zip
           if-no-files-found: error
 
       - name: 发布到 GitHub Release
@@ -120,14 +125,17 @@ jobs:
         run: |
           set -euo pipefail
           v="${{ needs.prepare.outputs.version }}"
-          f="dist/port_helper-$v.exe"
-          test -f "$f" || { echo "::error::找不到 $f"; exit 1; }
+          exe="dist/port_helper-$v.exe"
+          zip="dist/port_helper-$v.zip"
+          test -f "$exe" || { echo "::error::找不到 $exe"; exit 1; }
+          test -f "$zip" || { echo "::error::找不到 $zip"; exit 1; }
 
+          # zip 是应用内更新用的（11MB），exe 是首次安装用的（17MB），两个都发。
           if gh release view "v$v" >/dev/null 2>&1; then
             echo "Release v$v 已存在，覆盖附件"
-            gh release upload "v$v" "$f" --clobber
+            gh release upload "v$v" "$exe" "$zip" --clobber
           else
-            gh release create "v$v" "$f" \
+            gh release create "v$v" "$exe" "$zip" \
               --title "端口助手 v$v" \
               --generate-notes
           fi

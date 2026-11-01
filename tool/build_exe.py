@@ -30,7 +30,19 @@ RELEASE = ROOT / "build" / "windows" / "x64" / "runner" / "Release"
 DIST = ROOT / "dist"
 APP = "port_helper"
 MAGIC = 0x504F525448454C50  # 'PORTHELP'
-TAIL = struct.Struct("<QQ")  # magic, payload 长度（小端）
+# magic(8) + payload 长度(8) + 内置版本码(4) + 保留(4)
+TAIL = struct.Struct("<QQII")
+
+
+def version_code(version: str) -> int:
+    """1.2.0 → 10200。启动器和应用都用这个整数比较版本、当缓存目录名。"""
+    parts = []
+    for chunk in version.split(".")[:3]:
+        digits = "".join(c for c in chunk if c.isdigit())
+        parts.append(int(digits) if digits else 0)
+    while len(parts) < 3:
+        parts.append(0)
+    return parts[0] * 10000 + parts[1] * 100 + parts[2]
 
 
 def stamp_resources(exe: Path, version: str) -> None:
@@ -214,19 +226,26 @@ def main() -> None:
     version = read_version()
     bootstrapper = build_bootstrapper(version)
     payload = pack_app_zip()
+    code = version_code(version)
 
     DIST.mkdir(exist_ok=True)
     target = DIST / f"端口助手-{version}.exe"
     with target.open("wb") as fp:
         fp.write(bootstrapper.read_bytes())
         fp.write(payload)
-        fp.write(TAIL.pack(MAGIC, len(payload)))
+        fp.write(TAIL.pack(MAGIC, len(payload), code, 0))
 
     size_mb = target.stat().st_size / 1024 / 1024
     print(f"\n已生成 {target}")
     print(f"体积 {size_mb:.1f} MB（启动器 {bootstrapper.stat().st_size/1024/1024:.1f} MB + 应用 {len(payload)/1024/1024:.1f} MB）")
+    print(f"内置版本码 {code}")
     print("校验最终 exe 的资源:")
     ok = verify(target)
+
+    # payload 本身就是 zip，直接落盘当作更新包 —— 应用内更新下载它，比下 exe 省 6MB。
+    zip_path = DIST / f"{APP}-{version}.zip"
+    zip_path.write_bytes(payload)
+    print(f"更新包 {zip_path}")
 
     if args.also_ascii:
         ascii_target = DIST / f"{APP}-{version}.exe"
