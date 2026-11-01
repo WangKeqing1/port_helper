@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:port_helper/src/data/port_scanner.dart';
+import 'package:port_helper/src/data/update_service.dart';
 import 'package:port_helper/src/model/models.dart';
+import 'package:port_helper/src/model/update_info.dart';
 import 'package:port_helper/src/state/port_controller.dart';
+import 'package:port_helper/src/state/update_controller.dart';
 import 'package:port_helper/src/theme/app_theme.dart';
 import 'package:port_helper/src/ui/home_page.dart';
 
@@ -56,15 +59,33 @@ class _FakeScanner extends PortScanner {
   Future<KillOutcome> kill(int pid) async => const KillOutcome(ok: true, message: 'ok');
 }
 
-Widget _host(PortController controller) {
+Widget _host(PortController controller, {UpdateController? update}) {
   return MaterialApp(
     theme: buildAppTheme(),
     home: Scaffold(
       body: Center(
-        child: SizedBox(width: 920, height: 736, child: HomePage(controller: controller)),
+        child: SizedBox(
+          width: 920,
+          height: 736,
+          child: HomePage(controller: controller, updateController: update),
+        ),
       ),
     ),
   );
+}
+
+/// 假装已经查到新版本，用来验证状态栏和弹窗的渲染。
+class _FoundUpdateService extends UpdateService {
+  @override
+  Future<UpdateInfo?> check() async => const UpdateInfo(
+        version: '9.9.9',
+        code: 90909,
+        downloadUrl: 'https://example.com/x.zip',
+        sizeBytes: 11 * 1024 * 1024,
+        isZip: true,
+        releaseUrl: 'https://example.com',
+        notes: '- 测试用更新说明',
+      );
 }
 
 void main() {
@@ -213,6 +234,28 @@ void main() {
       expect(find.text('node.exe'), findsWidgets);
       expect(find.text('强制结束进程'), findsOneWidget);
       expect(find.textContaining('查询完成'), findsOneWidget);
+    });
+
+    testWidgets('有更新时状态栏出现入口，点开是更新弹窗', (tester) async {
+      tester.view.physicalSize = const Size(920, 736);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+
+      final controller = PortController(scanner: _FakeScanner());
+      final update = UpdateController(service: _FoundUpdateService(), enabled: true);
+      await tester.pumpWidget(_host(controller, update: update));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+
+      expect(find.textContaining('新版本 v9.9.9'), findsOneWidget);
+
+      await tester.tap(find.textContaining('新版本 v9.9.9'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+
+      expect(find.text('发现新版本'), findsOneWidget);
+      expect(find.text('立即更新'), findsOneWidget);
+      expect(find.text('稍后'), findsOneWidget);
     });
 
     testWidgets('点「强制结束进程」弹出确认框', (tester) async {
