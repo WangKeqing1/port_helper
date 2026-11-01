@@ -1,0 +1,129 @@
+name: Release
+
+# 版本号驱动的自动发布：
+#   改了 pubspec.yaml 的 version → push 到 main → 自动构建并发布
+#   版本号没变 → 跳过构建（只跑 CI）
+# 也可以手动触发，并选择强制重发。
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      force:
+        description: 该版本已存在时强制重新构建并覆盖附件
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    name: 判断是否需要发布
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+      release: ${{ steps.meta.outputs.release }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # 需要读 tag
+
+      - name: 读取版本号并检查 tag
+        id: meta
+        run: |
+          VERSION=$(grep -m1 '^version:' pubspec.yaml | sed -E 's/^version:[[:space:]]*//; s/\+.*$//' | tr -d '[:space:]')
+          if [ -z "$VERSION" ]; then
+            echo "::error::pubspec.yaml 里读不到 version"
+            exit 1
+          fi
+          echo "版本号: $VERSION"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+          FORCE="${{ inputs.force }}"
+          if git rev-parse -q --verify "refs/tags/v$VERSION" >/dev/null; then
+            echo "tag v$VERSION 已存在"
+            if [ "$FORCE" = "true" ]; then
+              echo "手动强制发布"
+              echo "release=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "版本号未变更，跳过发布"
+              echo "release=false" >> "$GITHUB_OUTPUT"
+            fi
+          else
+            echo "新版本，准备发布"
+            echo "release=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  build:
+    name: 构建并发布
+    needs: prepare
+    if: needs.prepare.outputs.release == 'true'
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 安装 Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.47.2'
+          cache: true
+
+      - name: 拉取依赖
+        run: flutter pub get
+
+      - name: 静态分析
+        run: flutter analyze
+
+      - name: 测试
+        # 发布前再兜一道，别把测试不过的版本发出去。
+        run: flutter test
+
+      - name: 构建 Windows 发布版
+        run: flutter build windows --release
+
+      - name: 打包单文件 exe
+        # 这一步会编译启动器、用 rcedit 注入图标与版本信息、拼接 payload。
+        run: python tool/build_exe.py
+
+      - name: 校验产物
+        shell: bash
+        run: |
+          v="${{ needs.prepare.outputs.version }}"
+          ls -lh dist/
+          test -f "dist/端口助手-$v.exe" || { echo "::error::没生成 exe"; exit 1; }
+
+      - name: 上传构建产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: port_helper-${{ needs.prepare.outputs.version }}
+          path: dist/port_helper-*.exe
+          if-no-files-found: warn
+
+      - name: 发布到 GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          v="${{ needs.prepare.outputs.version }}"
+          # Release 附件用英文名，避免下载链接里出现一长串百分号编码。
+          cp "dist/端口助手-$v.exe" "dist/port_helper-$v.exe"
+
+          if gh release view "v$v" >/dev/null 2>&1; then
+            echo "Release v$v 已存在，覆盖附件"
+            gh release upload "v$v" "dist/port_helper-$v.exe" --clobber
+          else
+            gh release create "v$v" "dist/port_helper-$v.exe" \
+              --title "端口助手 v$v" \
+              --generate-notes
+          fi
+          echo "已发布: $(gh release view "v$v" --json url -q .url)"

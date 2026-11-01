@@ -121,10 +121,51 @@ flutter test
 
 - `test/widget_test.dart`：netstat 解析、模型格式化、控制器状态机、页面冒烟
 - `test/golden_test.dart`：三个状态的像素级金标（`test/goldens/`）
+- `test/icon_test.dart`：图标母版渲染（生成工具，不是回归测试）
+- `test/support/test_fonts.dart`：测试字体装配。图标字体路径不写死，从 flutter_tester 位置反推 SDK 根目录，本地和 CI 都能用
 
 > 注意：如果本机设置了 `HTTP_PROXY` / `HTTPS_PROXY`，`flutter test` 会因为
 > flutter_tester 的本地 WebSocket 走代理而报 `Invalid WebSocket upgrade request`。
 > 跑测试前清掉代理变量即可：`env -u HTTP_PROXY -u HTTPS_PROXY flutter test`。
+
+golden 和 icon 用例在 CI 上会自动跳过（`CI=true` 时），因为远程环境的字体版本和
+抗锯齿跟本地不完全一致，逐像素比对容易误报。CI 覆盖的是逻辑与冒烟部分。
+
+## 持续集成与发版
+
+两个 workflow，都在 `.github/workflows/`：
+
+| 文件 | 触发 | 做什么 |
+| --- | --- | --- |
+| `ci.yml` | push / PR 到 main | `flutter analyze` + `flutter test`（windows-latest，约 3 分钟） |
+| `release.yml` | push 到 main / 手动 | 版本号有变化时构建并发布 Release |
+
+### 日常发版流程
+
+```bash
+# 1. 改代码
+# 2. 改版本号
+#    pubspec.yaml: version: 1.0.1+2
+git commit -am "fix: xxx"
+git push
+```
+
+推上去之后，`release.yml` 会读 `pubspec.yaml` 的 version：
+
+- tag `v1.0.1` 不存在 → 构建 → 打 tag → 创建 Release 并附上单文件 exe
+- tag 已存在（版本号没改）→ 跳过构建，只留 CI 跑测试
+
+**所以发版的关键就是记得改版本号。** 只改代码不改版本号不会触发发布。
+
+需要重发同一个版本时，去 Actions 页面手动跑 `Release`，勾上 `force`。
+
+### 额度
+
+私有仓库的 GitHub Free 每月有 $12 计算额度（Windows runner $0.010/分钟，
+折合约 1200 分钟）。一次完整发布约 8 分钟，个人开发完全够用。
+
+额度用尽不会自动扣费 —— 默认 spending limit 是 $0，任务直接失败，下月重置。
+改成公开仓库则标准 runner 完全免费。
 
 ## 已知限制
 

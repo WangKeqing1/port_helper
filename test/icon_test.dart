@@ -1,30 +1,20 @@
-import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+
+import 'support/test_fonts.dart';
 
 /// 应用图标母版渲染。
 ///
 /// 不用 Material 字形而手绘，是因为字形的笔画在 16px 下不足一个像素，
-/// 任务栏里会糊成一团。这里全部用粗笔画（最细处也有 8.8% 画布宽），
+/// 任务栏里会糊成一团。这里全部用粗笔画（最细处也有 8.2% 画布宽），
 /// 从 16px 到 256px 都能认出来。
 ///
 /// 用法：flutter test test/icon_test.dart --update-goldens
 /// 产物 test/icons/app_icon_1024.png，再由 tool/make_icon.py 转成多尺寸 .ico。
-
-const _materialIcons =
-    r'C:\Users\mashiro\develop\flutter\bin\cache\artifacts\material_fonts\materialicons-regular.otf';
-
-Future<void> _registerIconFont() async {
-  final file = File(_materialIcons);
-  if (!file.existsSync()) return;
-  final bytes = file.readAsBytesSync();
-  final loader = FontLoader('MaterialIcons')
-    ..addFont(Future.value(ByteData.sublistView(bytes)));
-  await loader.load();
-}
+///
+/// 这是生成工具而不是回归测试，CI 上跳过。
 
 /// 电源断开符号：开口圆环 + 顶部竖线。笔画粗，缩到 16px 也不会糊。
 class _PowerGlyphPainter extends CustomPainter {
@@ -64,8 +54,6 @@ class _PowerGlyphPainter extends CustomPainter {
 }
 
 void main() {
-  setUpAll(_registerIconFont);
-
   testWidgets('render app icon', (tester) async {
     const size = 1024.0;
     tester.view.physicalSize = const Size(size, size);
@@ -102,5 +90,5 @@ void main() {
       find.byType(SizedBox).first,
       matchesGoldenFile('icons/app_icon_1024.png'),
     );
-  });
+  }, skip: TestFonts.isCi);
 }

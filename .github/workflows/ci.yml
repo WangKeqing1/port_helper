@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# 同一分支连续推送时，只保留最新的那次，省额度。
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: 分析与测试
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          # 和本地保持一致，避免引擎/字体差异带来的意外。
+          flutter-version: '3.47.2'
+          cache: true
+
+      - name: 拉取依赖
+        run: flutter pub get
+
+      - name: 静态分析
+        run: flutter analyze
+
+      - name: 测试
+        # golden / icon 用例在 CI 里自动跳过（见 test/support/test_fonts.dart），
+        # 这里跑的是解析、状态机和页面冒烟。
+        run: flutter test --reporter expanded
