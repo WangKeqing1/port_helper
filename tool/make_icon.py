@@ -3,9 +3,17 @@
 母版由 test/icon_test.dart 生成（1024×1024，透明圆角）。
 用法：python tool/make_icon.py
 """
+import sys
 from pathlib import Path
 
 from PIL import Image
+
+# Windows CI / 精简终端的 stdout 可能是 cp1252，打印中文会抛 UnicodeEncodeError。
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
 
 ROOT = Path(__file__).resolve().parent.parent
 SRC = ROOT / "test" / "icons" / "app_icon_1024.png"

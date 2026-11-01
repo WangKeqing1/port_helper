@@ -6,8 +6,16 @@ Flutter 的 Windows 程序不能只发 exe —— 还要带上 flutter_windows.d
 用法：python tool/package.py
 """
 import re
+import sys
 import zipfile
 from pathlib import Path
+
+# Windows CI / 精简终端的 stdout 可能是 cp1252，打印中文会抛 UnicodeEncodeError。
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
 
 ROOT = Path(__file__).resolve().parent.parent
 RELEASE = ROOT / "build" / "windows" / "x64" / "runner" / "Release"

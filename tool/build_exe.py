@@ -6,6 +6,7 @@
 用法：python tool/build_exe.py
 前置：flutter build windows --release
 """
+import argparse
 import os
 import re
 import shutil
@@ -15,6 +16,14 @@ import sys
 import tempfile
 import zipfile
 from pathlib import Path
+
+# Windows CI（和部分精简终端）的 stdout 是 cp1252，打印中文会直接抛
+# UnicodeEncodeError。这里强制切到 UTF-8。
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+except Exception:  # 老版本 Python 或被重定向到不支持 reconfigure 的对象
+    pass
 
 ROOT = Path(__file__).resolve().parent.parent
 RELEASE = ROOT / "build" / "windows" / "x64" / "runner" / "Release"
@@ -194,6 +203,14 @@ def pack_app_zip() -> bytes:
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser(description="把 Release 目录打成单文件 exe")
+    parser.add_argument(
+        "--also-ascii",
+        action="store_true",
+        help="额外输出一份英文名副本，供 CI 上传（避免 Release 附件链接出现百分号编码）",
+    )
+    args = parser.parse_args()
+
     version = read_version()
     bootstrapper = build_bootstrapper(version)
     payload = pack_app_zip()
@@ -209,8 +226,15 @@ def main() -> None:
     print(f"\n已生成 {target}")
     print(f"体积 {size_mb:.1f} MB（启动器 {bootstrapper.stat().st_size/1024/1024:.1f} MB + 应用 {len(payload)/1024/1024:.1f} MB）")
     print("校验最终 exe 的资源:")
-    verify(target)
+    ok = verify(target)
+
+    if args.also_ascii:
+        ascii_target = DIST / f"{APP}-{version}.exe"
+        shutil.copyfile(target, ascii_target)
+        print(f"英文名副本 {ascii_target}")
+
     print("双击即用，首次运行会解压到 %LOCALAPPDATA%\\PortHelper，之后秒开。")
+    return 0 if ok else 1
 
 
 if __name__ == "__main__":

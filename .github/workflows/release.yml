@@ -66,6 +66,10 @@ jobs:
     if: needs.prepare.outputs.release == 'true'
     runs-on: windows-latest
     timeout-minutes: 40
+    env:
+      # Windows runner 上 Python 的默认 stdout 编码是 cp1252，脚本里的中文
+      # 会直接抛 UnicodeEncodeError。脚本内部也做了 reconfigure，这里是双保险。
+      PYTHONIOENCODING: utf-8
     steps:
       - uses: actions/checkout@v4
         with:
@@ -92,21 +96,22 @@ jobs:
 
       - name: 打包单文件 exe
         # 这一步会编译启动器、用 rcedit 注入图标与版本信息、拼接 payload。
-        run: python tool/build_exe.py
+        # --also-ascii 额外产出一份英文名副本，Release 附件用它。
+        run: python tool/build_exe.py --also-ascii
 
       - name: 校验产物
         shell: bash
         run: |
           v="${{ needs.prepare.outputs.version }}"
           ls -lh dist/
-          test -f "dist/端口助手-$v.exe" || { echo "::error::没生成 exe"; exit 1; }
+          test -f "dist/port_helper-$v.exe" || { echo "::error::没生成英文名 exe"; exit 1; }
 
       - name: 上传构建产物
         uses: actions/upload-artifact@v4
         with:
           name: port_helper-${{ needs.prepare.outputs.version }}
           path: dist/port_helper-*.exe
-          if-no-files-found: warn
+          if-no-files-found: error
 
       - name: 发布到 GitHub Release
         shell: bash
@@ -115,14 +120,14 @@ jobs:
         run: |
           set -euo pipefail
           v="${{ needs.prepare.outputs.version }}"
-          # Release 附件用英文名，避免下载链接里出现一长串百分号编码。
-          cp "dist/端口助手-$v.exe" "dist/port_helper-$v.exe"
+          f="dist/port_helper-$v.exe"
+          test -f "$f" || { echo "::error::找不到 $f"; exit 1; }
 
           if gh release view "v$v" >/dev/null 2>&1; then
             echo "Release v$v 已存在，覆盖附件"
-            gh release upload "v$v" "dist/port_helper-$v.exe" --clobber
+            gh release upload "v$v" "$f" --clobber
           else
-            gh release create "v$v" "dist/port_helper-$v.exe" \
+            gh release create "v$v" "$f" \
               --title "端口助手 v$v" \
               --generate-notes
           fi
